@@ -63,6 +63,7 @@ public class HttpRequest {
 	}
 	
 	public static HttpRequest readFrom(InputStream in) throws IOException, HttpException {
+		// Read request line
 		final ByteBuffer buffer = new ByteBuffer();
 		final Method method = readMethod(in, buffer);
 		buffer.reset();
@@ -70,8 +71,30 @@ public class HttpRequest {
 		buffer.reset();
 		final HttpVersion version = readVersion(in, buffer);
 		buffer.reset();
-		// TODO
-		final Map<String, List<String>> headers = new HashMap<>();
+		// Read header fields
+		Map<String, List<String>> headers = new HashMap<>();
+		HeaderReadResult result = readHeaderField(in, buffer);
+		int totalHeaderSize = 0;
+		while (result instanceof HeaderField field) {
+			totalHeaderSize = totalHeaderSize + field.size;
+			if (totalHeaderSize > 196608) { // > 24 * 8 kB, more than 24 full-sized header fields
+				throw new HttpException(431);
+			}
+			if (headers.containsKey(field.name)) {
+				headers.get(field.name).add(field.value);
+			} else {
+				LinkedList<String> list = new LinkedList<>();
+				list.add(field.value);
+				headers.put(field.name, list);
+			}
+			buffer.reset();
+			result = readHeaderField(in, buffer);
+		}
+		for (var field : headers.entrySet()) {
+			headers.put(field.getKey(), List.copyOf(field.getValue())); // make each list unmodifiable
+		}
+		headers = Map.copyOf(headers); // make map unmodifiable
+		// TODO: Read body
 		final byte[] body = null;
 		return new HttpRequest(method, target, version, headers, body);
 	}
@@ -174,17 +197,18 @@ public class HttpRequest {
 		}
 	}
 	
-	private static boolean readHeaderField(InputStream in, ByteBuffer buffer, Map<String, List<String>> map) {
+	private static HeaderReadResult readHeaderField(InputStream in, ByteBuffer buffer) {
 		int c = in.read();
 		if (c == CR) {
 			if (in.read() == LF) {
-				return false; // TODO: signal that it is a CRLF pair
+				return new CrLf(); // Signals that it is a CRLF pair
 			} else {
 				throw new HttpException(400);
 			}
 		}
 		int j = 1;
-		final int limit = 8196;
+		final int limit = 8192;
+		// Read header field name (until colon)
 		while (c != COL) {
 			if (!isTchar(c)) {
 				throw new HttpException(400);
@@ -198,6 +222,7 @@ public class HttpRequest {
 		}
 		String name = buffer.read(ASCII);
 		buffer.reset();
+		// Read header field value (until CRLF)
 		c = in.read();
 		j++;
 		while (c == SP || c == HTAB) { // skip any leading whitespaces
@@ -230,14 +255,7 @@ public class HttpRequest {
 		}
 		if (c == LF) {
 			String value = buffer.read(ASCII);
-			if (map.containsKey(name)) {
-				map.get(name).add(value);
-			} else {
-				LinkedList<String> list = new LinkedList<>();
-				list.add(value);
-				map.put(name, list);
-			}
-			return true; // signal that header was inserted
+			return new HeaderField(name, value, name.length() + value.length()); // Signals that header was inserted
 		} else {
 			throw new HttpException(400);
 		}
@@ -257,5 +275,11 @@ public class HttpRequest {
 			|| (c >= 0x41 && c <= 0x46)  // letter A-F
 			|| (c >= 0x61 && c <= 0x66); // letter a-f
 	}
+	
+	private static sealed interface HeaderReadResult permits HeaderField, CrLf {}
+	
+	private static record HeaderField(String name, String value, int size) implements HeaderReadResult {}
+	
+	private static record CrLf() implements HeaderReadResult {}
 	
 }
