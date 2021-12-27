@@ -1,6 +1,7 @@
 package http;
 
 import java.nio.charset.Charset;
+import java.util.NoSuchElementException;
 
 public class ByteBuffer {
 
@@ -14,7 +15,7 @@ public class ByteBuffer {
 		if (initialCapacity < 1) {
 			throw new IllegalArgumentException("Initial capacity must be at least 1.");
 		}
-		this.firstNode = new Node(initialCapacity);
+		this.firstNode = new Node(initialCapacity, null);
 		this.currentNode = firstNode;
 		this.singleNodeCapacity = initialCapacity;
 		this.numberOfNodes = 1;
@@ -30,6 +31,36 @@ public class ByteBuffer {
 			currentNode = currentNode.createNext(singleNodeCapacity);
 			numberOfNodes++;
 			currentNode.put(b);
+		}
+	}
+	
+	public boolean empty() {
+		return currentNode == firstNode && currentNode.position == 0;
+	}
+	
+	public byte peek() {
+		if (currentNode.position > 0) {
+			return currentNode.buffer[currentNode.position - 1];
+		} else if (currentNode == firstNode) {
+			throw new NoSuchElementException();
+		} else {
+			byte[] previousBuffer = currentNode.previousNode.buffer;
+			return previousBuffer[previousBuffer.length - 1];
+		}
+	}
+	
+	public byte pop() {
+		if (currentNode.position > 0) {
+			currentNode.position--;
+			return currentNode.buffer[currentNode.position];
+		} else if (currentNode == firstNode) {
+			throw new NoSuchElementException();
+		} else {
+			currentNode = currentNode.previousNode;
+			numberOfNodes--;
+			currentNode.hasNext = false;
+			currentNode.position = currentNode.buffer.length;
+			return currentNode.buffer[currentNode.position - 1];
 		}
 	}
 	
@@ -78,18 +109,20 @@ public class ByteBuffer {
 		private final byte[] buffer;
 		private int position; // index of current position for writing in buffer
 		private Node nextNode;
+		private Node previousNode;
 		private boolean hasNext;
 		
-		private Node(int capacity) {
+		private Node(int capacity, Node previous) {
 			this.buffer = new byte[capacity];
 			this.position = 0;
 			this.nextNode = null;
+			this.previousNode = previous;
 			this.hasNext = false;
 		}
 		
 		private Node createNext(int capacity) { // if it doesn't exist already; otherwise reuse a chain
 			if (nextNode == null) {
-				nextNode = new Node(capacity);
+				nextNode = new Node(capacity, this);
 			}
 			hasNext = true;
 			return this.nextNode;
