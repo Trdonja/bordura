@@ -197,7 +197,7 @@ public class HttpRequest {
 		}
 	}
 	
-	private static HeaderReadResult readHeaderField(InputStream in, ByteBuffer buffer) {
+	private static HeaderReadResult readHeaderField(InputStream in, ByteBuffer buffer)  throws IOException, HttpException {
 		int c = in.read();
 		if (c == CR) {
 			if (in.read() == LF) {
