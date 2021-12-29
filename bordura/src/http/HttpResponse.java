@@ -205,7 +205,7 @@ public class HttpResponse {
 			 */
 	}
 	
-	private record BodyPublisherOfByteArray(byte[] buf, int offset, int length) implements BodyPublisher {
+	private static record BodyPublisherOfByteArray(byte[] buf, int offset, int length) implements BodyPublisher {
 		public void writeTo(OutputStream out) throws IOException {
 			out.write(buf, offset, length);
 			out.flush();
@@ -215,7 +215,7 @@ public class HttpResponse {
 		}
 	}
 	
-	private record BodyPublisherOfFile(Path path) implements BodyPublisher {
+	private static record BodyPublisherOfFile(Path path) implements BodyPublisher {
 		public void writeTo(OutputStream out) throws IOException {
 			try (var fileStream = new BufferedInputStream(Files.newInputStream(path))) {
 				fileStream.transferTo(out);
@@ -227,7 +227,7 @@ public class HttpResponse {
 		}
 	}
 	
-	private record BodyPublisherOfString(String s, Charset charset) implements BodyPublisher {
+	private static record BodyPublisherOfString(String s, Charset charset) implements BodyPublisher {
 		public void writeTo(OutputStream out) throws IOException {
 			out.write(s.getBytes(charset));
 			out.flush();
@@ -237,7 +237,7 @@ public class HttpResponse {
 		}
 	}
 	
-	private record NoBody() implements BodyPublisher {
+	private static record NoBody() implements BodyPublisher {
 		public void writeTo(OutputStream out) {} // Do nothing.
 		public long contentLength() {
 			return 0L;
