@@ -201,7 +201,7 @@ public class HttpRequest {
 		int c = in.read();
 		if (c == CR) {
 			if (in.read() == LF) {
-				return new CrLf(); // Signals that it is a CRLF pair
+				return HeaderReadResult.ofCRLF(); // Signals that it is a CRLF pair
 			} else {
 				throw new HttpException(400);
 			}
@@ -236,7 +236,7 @@ public class HttpRequest {
 		while (c != CR) {
 			if (j > limit) {
 				throw new HttpException(431);
-			} else if ((c >= 0x20 && c <= 0x7E) || (c == 0x09)) {
+			} else if ((c >= 0x20 && c <= 0x7E) || (c == HTAB)) {
 				// c is VCHAR (visible, printing character) or SP (0x20) or HTAB (0x09)
 				buffer.put((byte) c);
 				c = in.read();
@@ -247,7 +247,7 @@ public class HttpRequest {
 		}
 		while (!buffer.empty()) { // remove trailing whitespaces
 			int p = buffer.peek(); // inspect last element in buffer
-			if (p == 0x20 || p == 0x09) { // if SP or HTAB
+			if (p == SP || p == HTAB) {
 				buffer.pop(); // remove it
 			} else {
 				break;
@@ -255,13 +255,13 @@ public class HttpRequest {
 		}
 		if (c == LF) {
 			String value = buffer.read(ASCII);
-			return new HeaderField(name, value, name.length() + value.length()); // Signals that header was inserted
+			return HeaderReadResult.ofPair(name, value); // Signals that header was inserted
 		} else {
 			throw new HttpException(400);
 		}
 	}
 	
-	private static boolean isTchar(int c) {
+	static boolean isTchar(int c) {
 		return     (c >= 0x5E && c < 0x7A) // '^', '_', '`' or lower-case letter
 				|| (c >= 0x41 && c <= 0x5A) // upper-case letter
 				|| (c >= 0x30 && c <= 0x39) // digit
@@ -276,7 +276,19 @@ public class HttpRequest {
 			|| (c >= 0x61 && c <= 0x66); // letter a-f
 	}
 	
-	private static sealed interface HeaderReadResult permits HeaderField, CrLf {}
+	private static sealed interface HeaderReadResult permits HeaderField, CrLf {
+		
+		private static HeaderReadResult ofPair(String name, String value) {
+			return new HeaderField(name, value, name.length() + value.length());
+		}
+		
+		private static HeaderReadResult ofCRLF() {
+			return CRLF;
+		}
+		
+		static final CrLf CRLF = new CrLf();
+		
+	}
 	
 	private static record HeaderField(String name, String value, int size) implements HeaderReadResult {}
 	
