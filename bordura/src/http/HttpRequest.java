@@ -215,6 +215,10 @@ public class HttpRequest {
 			} else if (j > limit) {
 				throw new HttpException(431);
 			} else {
+				// normalize names to lower-case
+				if (c >= 0x41 && c <= 0x5A) { // if c is upper-case letter, A-Z
+					c = c + 0x20; // convert it to lower-case counterpart, a-z
+				}
 				buffer.put((byte) c);
 				c = in.read();
 				j++;
