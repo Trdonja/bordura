@@ -2,6 +2,7 @@ package http;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -10,6 +11,8 @@ import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
+import java.util.zip.GZIPOutputStream;
 
 public class HttpResponse {
 		
@@ -62,14 +65,65 @@ public class HttpResponse {
 	private final List<Map.Entry<String, String>> headers;
 	private final BodyPublisher bodyPublisher;
 	private final boolean useGzipTransferEncoding; // indicates if gzip Transfer-Encoding for body must be used
+	private final boolean writeBody; /* indicates if body is to be written to response;
+									  * if this is response to HEAD request, writeBody should be false. */
 	
 	private HttpResponse(HttpVersion version, int status, List<Map.Entry<String, String>> headers,
-						 BodyPublisher bodyPublisher, boolean useGzipTransferEncoding) {
+						 BodyPublisher bodyPublisher, boolean useGzipTransferEncoding,
+						 boolean writeBody) {
 		this.version = version;
 		this.status = status;
 		this.headers = List.copyOf(headers); // create unmodifiable list
 		this.bodyPublisher = bodyPublisher;
 		this.useGzipTransferEncoding = useGzipTransferEncoding;
+		this.writeBody = writeBody;
+	}
+	
+	public void writeTo(OutputStream out) throws IOException {
+		// write status line
+		out.write(version.charBytes());
+		out.write((byte) AsciiChars.SP);
+		out.write(Integer.toString(status).getBytes(StandardCharsets.US_ASCII));
+		out.write((byte) AsciiChars.SP);
+		out.write(statusCodes.get(status).getBytes(StandardCharsets.US_ASCII));
+		out.write((byte) AsciiChars.CR);
+		out.write((byte) AsciiChars.LF);
+		// write headers
+		var iter = headers.listIterator();
+		while (iter.hasNext()) {
+			var header = iter.next();
+			out.write(header.getKey().getBytes(StandardCharsets.US_ASCII));
+			out.write(AsciiChars.COL);
+			out.write(AsciiChars.SP);
+			out.write(header.getValue().getBytes(StandardCharsets.US_ASCII));
+			out.write((byte) AsciiChars.CR);
+			out.write((byte) AsciiChars.LF);
+		}
+		// write empty line
+		out.write((byte) AsciiChars.CR);
+		out.write((byte) AsciiChars.LF);
+		// write body, if present
+		if (!this.writeBody) {
+			return;
+		}
+		long contentLength = this.bodyPublisher.contentLength();
+		if (contentLength != 0) {
+			if (useGzipTransferEncoding) { // use gzip and chunked TE
+				ChunkedOutputStream chunkedOut = new ChunkedOutputStream(out, 1024);
+				GZIPOutputStream gzipOut = new GZIPOutputStream(chunkedOut);
+				bodyPublisher.writeTo(gzipOut);
+				gzipOut.flush();
+				gzipOut.finish();
+				chunkedOut.finish();
+			} else if (contentLength < 0) { // use only chunked TE
+				ChunkedOutputStream chunkedOut = new ChunkedOutputStream(out, 1024);
+				bodyPublisher.writeTo(chunkedOut);
+				chunkedOut.finish();
+			} else { // use no TE
+				bodyPublisher.writeTo(out);
+				out.flush();
+			}
+		}
 	}
 	
 	/*
@@ -88,6 +142,7 @@ public class HttpResponse {
 		private List<Map.Entry<String, String>> headers;
 		private BodyPublisher bodyPub;
 		private boolean gzipTE;
+		private boolean writeBody;
 		
 		private Builder() {
 			this.version = HttpVersion.HTTP_1_1;
@@ -95,6 +150,7 @@ public class HttpResponse {
 			this.headers = new LinkedList<Map.Entry<String, String>>();
 			this.bodyPub = BodyPublisher.noBody();
 			this.gzipTE = false;
+			this.writeBody = true;
 		}
 		
 		public Builder version(HttpVersion version) {
@@ -144,21 +200,29 @@ public class HttpResponse {
 		}
 		
 		public Builder useGzipTransferEncoding(boolean use) {
-			this.gzipTE = use; // if true, it will be also chunked (a single chunk)
+			this.gzipTE = use; // if true, it will be also chunked
+			return this;
+		}
+		
+		public Builder writeBody(boolean w) {
+			this.writeBody = w;
 			return this;
 		}
 		
 		public HttpResponse build() throws IOException { // throws if file size cannot be read
 			// Add appropriate "Content-Length" and "Transfer-Encoding" headers, if body is present
-			if (!(this.bodyPub instanceof NoBody)) {
+			long contentLength = this.bodyPub.contentLength();
+			if (contentLength != 0) { // body is present
 				if (this.gzipTE) {
 					this.headers.add(Map.entry("Transfer-Encoding", "gzip, chunked"));
+				} else if (contentLength < 0) { // unknown length
+					this.headers.add(Map.entry("Transfer-Encoding", "chunked"));
 				} else {
-					this.headers.add(Map.entry("Content-Length", Long.toString(this.bodyPub.contentLength())));
+					this.headers.add(Map.entry("Content-Length", Long.toString(contentLength)));
 				}
 			}
 			return new HttpResponse(this.version, this.status, this.headers,
-					this.bodyPub, this.gzipTE);
+					this.bodyPub, this.gzipTE, this.writeBody);
 		}
 		
 	}
@@ -166,21 +230,24 @@ public class HttpResponse {
 	public static sealed interface BodyPublisher
 		permits BodyPublisherOfByteArray,
 				BodyPublisherOfFile,
-				BodyPublisherOfString,
+				BodyPublisherOfInputStream,
 				NoBody
 	{
 			void writeTo(OutputStream out) throws IOException;
 			
-			long contentLength() throws IOException;
+			long contentLength() throws IOException; /* If negative, then the length is not known
+			* and "Transfer-Encoding: chunked" will be used to write the body content to the
+			* output stream.
+			* IOException is thrown if the source is a file and file size cannot be obtained. */
 			
 			static final NoBody NO_BODY = new NoBody();
 			
-			public static BodyPublisher ofByteArray(byte[] buf) {
-				return new BodyPublisherOfByteArray(buf, 0, buf.length);
+			public static BodyPublisher ofByteArray(byte[] b) {
+				return new BodyPublisherOfByteArray(b, 0, b.length);
 			}
 			
-			public static BodyPublisher ofByteArray(byte[] buf, int offset, int length) {
-				return new BodyPublisherOfByteArray(buf, offset, length);
+			public static BodyPublisher ofByteArray(byte[] b, int offset, int length) {
+				return new BodyPublisherOfByteArray(b, offset, length);
 			}
 			
 			public static BodyPublisher ofFile(Path path) {
@@ -188,11 +255,15 @@ public class HttpResponse {
 			}
 			
 			public static BodyPublisher ofString(String s) {
-				return new BodyPublisherOfString(s, StandardCharsets.UTF_8);
+				return BodyPublisher.ofByteArray(s.getBytes(StandardCharsets.UTF_8));
 			}
 			
 			public static BodyPublisher ofString(String s, Charset charset) {
-				return new BodyPublisherOfString(s, charset);
+				return BodyPublisher.ofByteArray(s.getBytes(charset));
+			}
+			
+			public static BodyPublisher ofInputStream(Supplier<? extends InputStream> streamSupplier) {
+				return new BodyPublisherOfInputStream(streamSupplier);
 			}
 			
 			public static BodyPublisher noBody() {
@@ -205,10 +276,9 @@ public class HttpResponse {
 			 */
 	}
 	
-	private static record BodyPublisherOfByteArray(byte[] buf, int offset, int length) implements BodyPublisher {
+	private static record BodyPublisherOfByteArray(byte[] b, int offset, int length) implements BodyPublisher {
 		public void writeTo(OutputStream out) throws IOException {
-			out.write(buf, offset, length);
-			out.flush();
+			out.write(b, offset, length);
 		}
 		public long contentLength() {
 			return length;
@@ -220,20 +290,20 @@ public class HttpResponse {
 			try (var fileStream = new BufferedInputStream(Files.newInputStream(path))) {
 				fileStream.transferTo(out);
 			}
-			out.flush();
 		}
 		public long contentLength() throws IOException {
 			return Files.size(path);
 		}
 	}
 	
-	private static record BodyPublisherOfString(String s, Charset charset) implements BodyPublisher {
+	private static record BodyPublisherOfInputStream(Supplier<? extends InputStream> streamSupplier)
+		implements BodyPublisher {
 		public void writeTo(OutputStream out) throws IOException {
-			out.write(s.getBytes(charset));
-			out.flush();
+			var inputStream = streamSupplier.get();
+			inputStream.transferTo(out);
 		}
 		public long contentLength() {
-			return (long) s.length();
+			return -7L; // unknown length at this time; writing to out will be chunked
 		}
 	}
 	
