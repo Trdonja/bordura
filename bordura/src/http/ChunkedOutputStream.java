@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 class ChunkedOutputStream extends FilterOutputStream {
 
-	private byte[] buf;
+	private byte[] buf; // buffer for a chunk
 	private int count; // number of valid bytes in the buffer
 		
 	ChunkedOutputStream(OutputStream out, int size) {
@@ -28,7 +28,7 @@ class ChunkedOutputStream extends FilterOutputStream {
 	@Override
 	public void write(int b) throws IOException {
 		if (count == buf.length) {
-			flush();
+			writeAsChunk(); // this also sets count to 0
 		}
 		buf[count] = (byte) b;
 		count++;
@@ -44,8 +44,8 @@ class ChunkedOutputStream extends FilterOutputStream {
 		int available = buf.length - count;
 		while (len > available) {
 			System.arraycopy(b, off, buf, count, available);
-			count = buf.length; // flush() will use this value
-			flush(); // this also puts count to 0
+			count = buf.length; // writeAsChunk() will use this value
+			writeAsChunk(); // this also puts count to 0
 			off = off + available;
 			len = len - available;
 			available = buf.length;
@@ -54,11 +54,10 @@ class ChunkedOutputStream extends FilterOutputStream {
 		count = count + len;
 	}
 	
-	/* Writes any present bytes in buffer as a chunk to the underlying output stream,
-	 * resets the buffer and flushes the underlying output stream.
+	/* Writes any present bytes in buffer as a chunk to the underlying output stream
+	 * and resets the buffer.
 	*/
-	@Override
-	public void flush() throws IOException { // flushes buffer as a chunk to the underlying output stream
+	private void writeAsChunk() throws IOException {
 		if (count == 0) {
 			return;
 		}
@@ -69,28 +68,35 @@ class ChunkedOutputStream extends FilterOutputStream {
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
 		count = 0;
+	}
+	
+	/* Writes any present bytes in buffer as a chunk to the underlying output stream,
+	 * resets the buffer and flushes the underlying output stream.
+	*/
+	@Override
+	public void flush() throws IOException { // flushes buffer as a chunk to the underlying output stream
+		writeAsChunk(); // this also puts count to 0
 		out.flush();
 	}
 	
 	@Override
 	public void close() throws IOException {
 		finish();
-		buf = null;
-		count = 0;
 		out.close();
 	}
 	
 	/* Writes any remaining bytes in buffer as a chunk to the underlying output stream,
-	 * then writes last-chunk and the last CRLF.
+	 * followed by last-chunk and the last CRLF. Finally, it flushes the underlying stream.
 	 * Does NOT close the underlying output stream.
 	*/
 	void finish() throws IOException {
-		flush();
+		writeAsChunk(); // this also puts count to 0
 		out.write((byte) 0x30); // ASCII zero, '0'
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
+		out.flush();
 		buf = null;
 		count = 0;
 	}
