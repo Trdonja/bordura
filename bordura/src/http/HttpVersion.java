@@ -1,20 +1,28 @@
 package http;
 
+import java.nio.charset.StandardCharsets;
+
 public enum HttpVersion {
 
 	HTTP_1_0 ("HTTP/1.0"),
 	HTTP_1_1 ("HTTP/1.1"),
 	HTTP_2 ("HTTP/2");
 	
-	private final String version;
+	private final String displayString;
+	private final byte[] charBytes;
 	
 	private HttpVersion(String display) {
-		this.version = display;
+		this.displayString = display;
+		this.charBytes = display.getBytes(StandardCharsets.US_ASCII);
 	}
 	
 	@Override
 	public String toString() {
-		return this.version;
+		return this.displayString;
+	}
+	
+	public byte[] charBytes() {
+		return this.charBytes;
 	}
 	
 	public static HttpVersion get(int majorVersion, int minorVersion) throws IllegalArgumentException {
