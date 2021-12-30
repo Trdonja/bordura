@@ -241,8 +241,6 @@ public class HttpResponse {
 			* output stream.
 			* IOException is thrown if the source is a file and file size cannot be obtained. */
 			
-			static final NoBody NO_BODY = new NoBody();
-			
 			public static BodyPublisher ofByteArray(byte[] b) {
 				return new BodyPublisherOfByteArray(b, 0, b.length);
 			}
@@ -314,5 +312,7 @@ public class HttpResponse {
 			return 0L;
 		}
 	}
+	
+	private static final NoBody NO_BODY = new NoBody();
 
 }
