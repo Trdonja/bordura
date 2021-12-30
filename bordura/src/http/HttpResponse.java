@@ -5,7 +5,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
+import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedList;
@@ -83,19 +84,19 @@ public class HttpResponse {
 		// write status line
 		out.write(version.charBytes());
 		out.write((byte) AsciiChars.SP);
-		out.write(Integer.toString(status).getBytes(StandardCharsets.US_ASCII));
+		out.write(Integer.toString(status).getBytes(US_ASCII));
 		out.write((byte) AsciiChars.SP);
-		out.write(statusCodes.get(status).getBytes(StandardCharsets.US_ASCII));
+		out.write(statusCodes.get(status).getBytes(US_ASCII));
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
 		// write headers
 		var iter = headers.listIterator();
 		while (iter.hasNext()) {
 			var header = iter.next();
-			out.write(header.getKey().getBytes(StandardCharsets.US_ASCII));
+			out.write(header.getKey().getBytes(US_ASCII));
 			out.write(AsciiChars.COL);
 			out.write(AsciiChars.SP);
-			out.write(header.getValue().getBytes(StandardCharsets.US_ASCII));
+			out.write(header.getValue().getBytes(US_ASCII));
 			out.write((byte) AsciiChars.CR);
 			out.write((byte) AsciiChars.LF);
 		}
@@ -170,7 +171,7 @@ public class HttpResponse {
 		public Builder addHeader(String name, String value) {
 			// (1) Validate characters in String name
 			for (int i = 0; i < name.length(); i++) {
-				if (!HttpRequest.isTchar(name.charAt(i))) { // character is not Tchar
+				if (!AsciiChars.isTchar(name.charAt(i))) { // character is not Tchar
 					throw new IllegalArgumentException("Invalid character in header field name.");
 				}
 			}
@@ -255,7 +256,7 @@ public class HttpResponse {
 			}
 			
 			public static BodyPublisher ofString(String s) {
-				return BodyPublisher.ofByteArray(s.getBytes(StandardCharsets.UTF_8));
+				return BodyPublisher.ofByteArray(s.getBytes(UTF_8));
 			}
 			
 			public static BodyPublisher ofString(String s, Charset charset) {

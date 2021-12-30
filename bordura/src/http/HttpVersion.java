@@ -1,6 +1,6 @@
 package http;
 
-import java.nio.charset.StandardCharsets;
+import static java.nio.charset.StandardCharsets.US_ASCII;;
 
 public enum HttpVersion {
 
@@ -13,7 +13,7 @@ public enum HttpVersion {
 	
 	private HttpVersion(String display) {
 		this.displayString = display;
-		this.charBytes = display.getBytes(StandardCharsets.US_ASCII);
+		this.charBytes = display.getBytes(US_ASCII);
 	}
 	
 	@Override

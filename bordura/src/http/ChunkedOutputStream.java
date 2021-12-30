@@ -84,7 +84,7 @@ class ChunkedOutputStream extends FilterOutputStream {
 	 * then writes last-chunk and the last CRLF.
 	 * Does NOT close the underlying output stream.
 	*/
-	void finish() {
+	void finish() throws IOException {
 		flush();
 		out.write((byte) 0x30); // ASCII zero, '0'
 		out.write((byte) AsciiChars.CR);
