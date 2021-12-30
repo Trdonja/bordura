@@ -103,23 +103,16 @@ public class HttpResponse {
 		// write empty line
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
-		// write body, if present
-		if (!this.writeBody) {
-			return;
-		}
-		long contentLength = this.bodyPublisher.contentLength();
-		if (contentLength != 0) {
+		// write body, if necessary
+		if (writeBody) {
+			long contentLength = this.bodyPublisher.contentLength();
+			if (contentLength == 0) {
+				return;
+			}
 			if (useGzipTransferEncoding) { // use gzip and chunked TE
-				ChunkedOutputStream chunkedOut = new ChunkedOutputStream(out, 1024);
-				GZIPOutputStream gzipOut = new GZIPOutputStream(chunkedOut);
-				bodyPublisher.writeTo(gzipOut);
-				gzipOut.flush();
-				gzipOut.finish();
-				chunkedOut.finish();
+				bodyPublisher.writeGzippedTo(new ChunkedOutputStream(out, 1024));
 			} else if (contentLength < 0) { // use only chunked TE
-				ChunkedOutputStream chunkedOut = new ChunkedOutputStream(out, 1024);
-				bodyPublisher.writeTo(chunkedOut);
-				chunkedOut.finish();
+				bodyPublisher.writeChunkedTo(out);
 			} else { // use no TE
 				bodyPublisher.writeTo(out);
 				out.flush();
@@ -240,6 +233,26 @@ public class HttpResponse {
 			* and "Transfer-Encoding: chunked" will be used to write the body content to the
 			* output stream.
 			* IOException is thrown if the source is a file and file size cannot be obtained. */
+			
+			default void writeChunkedTo(OutputStream out) throws IOException {
+				ChunkedOutputStream chunkedOut = new ChunkedOutputStream(out, 1024);
+				writeTo(chunkedOut);
+				chunkedOut.finish(); // writes everything and flushes, but does not close out
+			}
+			
+			default void writeGzippedTo(ChunkedOutputStream chunkedOut) throws IOException {
+				GZIPOutputStream gzipOut = new GZIPOutputStream(chunkedOut);
+				writeTo(gzipOut);
+				gzipOut.flush();
+				gzipOut.finish();
+				chunkedOut.finish(); // writes last-chunk and flushes, but does not close underlying output stream
+			}
+			
+			default void writeGzippedTo(OutputStream out) throws IOException {
+				GZIPOutputStream gzipOut = new GZIPOutputStream(out);
+				writeTo(gzipOut);
+				gzipOut.close(); // this will also close the connection
+			}
 			
 			public static BodyPublisher ofByteArray(byte[] b) {
 				return new BodyPublisherOfByteArray(b, 0, b.length);
