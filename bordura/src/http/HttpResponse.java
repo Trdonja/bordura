@@ -162,27 +162,27 @@ public class HttpResponse {
 		}
 		
 		public Builder addHeader(String name, String value) {
-			// (1) Validate characters in String name
-			for (int i = 0; i < name.length(); i++) {
-				if (!AsciiChars.isTchar(name.charAt(i))) { // character is not Tchar
-					throw new IllegalArgumentException("Invalid character in header field name.");
-				}
-			}
-			// (2) Validate characters in string value
-			for (int i = 0; i < value.length(); i++) {
-				int c = value.charAt(i);
-				if (c > 0x7E || (c < 0x20 && c != 0x09)) { // c is not VCHAR (visible, printing character)
-					// nor SP (0x20) nor HTAB (0x09)
-					throw new IllegalArgumentException("Invalid character in header field value.");
-				}
-			}
-			// (3) Reject "Content-Length" and "Transfer-Encoding" headers,
+			// (1) Reject "Content-Length" and "Transfer-Encoding" headers,
 			//     since they will be added automatically at build() method call as necessary.
 			String nameLower = name.toLowerCase();
 			if (nameLower.equals("content-length") || nameLower.equals("transfer-encoding")) {
 				throw new IllegalArgumentException("""
 				Content-Length and Transfer-Encoding header fields are added \
 				automatically at build() time, if needed at all.""");
+			}
+			// (2) Validate characters in name
+			for (int i = 0; i < name.length(); i++) {
+				if (!AsciiChars.isTchar(name.charAt(i))) { // character is not Tchar
+					throw new IllegalArgumentException("Invalid character in header field name.");
+				}
+			}
+			// (3) Validate characters in value
+			for (int i = 0; i < value.length(); i++) {
+				int c = value.charAt(i);
+				if (c > 0x7E || (c < 0x20 && c != 0x09)) { // c is not VCHAR (visible, printing character)
+					// nor SP (0x20) nor HTAB (0x09)
+					throw new IllegalArgumentException("Invalid character in header field value.");
+				}
 			}
 			this.headers.add(Map.entry(name, value));
 			return this;
