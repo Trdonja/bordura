@@ -66,18 +66,14 @@ public class HttpResponse {
 	private final List<Map.Entry<String, String>> headers;
 	private final BodyPublisher bodyPublisher;
 	private final boolean useGzipTransferEncoding; // indicates if gzip Transfer-Encoding for body must be used
-	private final boolean writeBody; /* indicates if body is to be written to response;
-									  * if this is response to HEAD request, writeBody should be false. */
 	
 	private HttpResponse(HttpVersion version, int status, List<Map.Entry<String, String>> headers,
-						 BodyPublisher bodyPublisher, boolean useGzipTransferEncoding,
-						 boolean writeBody) {
+						 BodyPublisher bodyPublisher, boolean useGzipTransferEncoding) {
 		this.version = version;
 		this.status = status;
 		this.headers = List.copyOf(headers); // create unmodifiable list
 		this.bodyPublisher = bodyPublisher;
 		this.useGzipTransferEncoding = useGzipTransferEncoding;
-		this.writeBody = writeBody;
 	}
 	
 	public void writeTo(OutputStream out) throws IOException {
@@ -104,11 +100,8 @@ public class HttpResponse {
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
 		// write body, if necessary
-		if (writeBody) {
-			long contentLength = this.bodyPublisher.contentLength();
-			if (contentLength == 0) {
-				return;
-			}
+		long contentLength = this.bodyPublisher.contentLength();
+		if (contentLength != 0) {
 			if (useGzipTransferEncoding) { // use gzip and chunked TE
 				bodyPublisher.writeGzippedTo(new ChunkedOutputStream(out, 1024));
 			} else if (contentLength < 0) { // use only chunked TE
@@ -136,7 +129,6 @@ public class HttpResponse {
 		private List<Map.Entry<String, String>> headers;
 		private BodyPublisher bodyPub;
 		private boolean gzipTE;
-		private boolean writeBody;
 		
 		private Builder() {
 			this.version = HttpVersion.HTTP_1_1;
@@ -144,7 +136,6 @@ public class HttpResponse {
 			this.headers = new LinkedList<Map.Entry<String, String>>();
 			this.bodyPub = BodyPublisher.noBody();
 			this.gzipTE = false;
-			this.writeBody = true;
 		}
 		
 		public Builder version(HttpVersion version) {
@@ -198,11 +189,6 @@ public class HttpResponse {
 			return this;
 		}
 		
-		public Builder writeBody(boolean w) {
-			this.writeBody = w;
-			return this;
-		}
-		
 		public HttpResponse build() throws IOException { // throws if file size cannot be read
 			// Add appropriate "Content-Length" and "Transfer-Encoding" headers, if body is present
 			long contentLength = this.bodyPub.contentLength();
@@ -216,7 +202,7 @@ public class HttpResponse {
 				}
 			}
 			return new HttpResponse(this.version, this.status, this.headers,
-					this.bodyPub, this.gzipTE, this.writeBody);
+					this.bodyPub, this.gzipTE);
 		}
 		
 	}
