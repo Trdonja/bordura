@@ -1,6 +1,7 @@
 package http;
 
 import java.io.BufferedInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -65,15 +66,15 @@ public class HttpResponse {
 	private final int status;
 	private final List<Map.Entry<String, String>> headers;
 	private final BodyPublisher bodyPublisher;
-	private final boolean useGzipTransferEncoding; // indicates if gzip Transfer-Encoding for body must be used
+	private final TransferEncoding transferEncoding;
 	
 	private HttpResponse(HttpVersion version, int status, List<Map.Entry<String, String>> headers,
-						 BodyPublisher bodyPublisher, boolean useGzipTransferEncoding) {
+						 BodyPublisher bodyPublisher, TransferEncoding transferEncoding) {
 		this.version = version;
 		this.status = status;
 		this.headers = List.copyOf(headers); // create unmodifiable list
 		this.bodyPublisher = bodyPublisher;
-		this.useGzipTransferEncoding = useGzipTransferEncoding;
+		this.transferEncoding = transferEncoding;
 	}
 	
 	public void writeTo(OutputStream out) throws IOException {
@@ -100,15 +101,30 @@ public class HttpResponse {
 		out.write((byte) AsciiChars.CR);
 		out.write((byte) AsciiChars.LF);
 		// write body, if necessary
-		long contentLength = this.bodyPublisher.contentLength();
-		if (contentLength != 0) {
-			if (useGzipTransferEncoding) { // use gzip and chunked TE
-				bodyPublisher.writeGzippedTo(new ChunkedOutputStream(out, 1024));
-			} else if (contentLength < 0) { // use only chunked TE
-				bodyPublisher.writeChunkedTo(out);
-			} else { // use no TE
+		if (bodyPublisher instanceof NoBody) {
+			if (transferEncoding == TransferEncoding.NONE_AND_CLOSE) {
+				out.close();
+			}
+		} else {
+			switch (transferEncoding) {
+			case NONE:
 				bodyPublisher.writeTo(out);
 				out.flush();
+				break;
+			case NONE_AND_CLOSE:
+				bodyPublisher.writeTo(out);
+				out.flush();
+				out.close();
+				break;
+			case CHUNKED:
+				bodyPublisher.writeChunkedTo(out);
+				break;
+			case GZIP_AND_CHUNKED:
+				bodyPublisher.writeGzippedTo(new ChunkedOutputStream(out, 1024));
+				break;
+			case GZIP_AND_CLOSE:
+				bodyPublisher.writeGzippedTo(out); // will also close out
+				break;
 			}
 		}
 	}
@@ -128,14 +144,16 @@ public class HttpResponse {
 		private int status;
 		private List<Map.Entry<String, String>> headers;
 		private BodyPublisher bodyPub;
-		private boolean gzipTE;
+		private boolean gzipTransferEncoding;
+		private boolean closeConnection;
 		
 		private Builder() {
 			this.version = HttpVersion.HTTP_1_1;
 			this.status = 500;
 			this.headers = new LinkedList<Map.Entry<String, String>>();
 			this.bodyPub = BodyPublisher.noBody();
-			this.gzipTE = false;
+			this.gzipTransferEncoding = false;
+			this.closeConnection = false;
 		}
 		
 		public Builder version(HttpVersion version) {
@@ -175,7 +193,7 @@ public class HttpResponse {
 					throw new IllegalArgumentException("Invalid character in header field value.");
 				}
 			}
-			this.headers.add(Map.entry(name, value));
+			headers.add(Map.entry(name, value));
 			return this;
 		}
 		
@@ -185,26 +203,67 @@ public class HttpResponse {
 		}
 		
 		public Builder useGzipTransferEncoding(boolean use) {
-			this.gzipTE = use; // if true, it will be also chunked
+			gzipTransferEncoding = use;
+			return this;
+		}
+		
+		public Builder closeConnectionAtEnd(boolean close) {
+			closeConnection = close;
 			return this;
 		}
 		
 		public HttpResponse build() throws IOException { // throws if file size cannot be read
 			// Add appropriate "Content-Length" and "Transfer-Encoding" headers, if body is present
-			long contentLength = this.bodyPub.contentLength();
-			if (contentLength != 0) { // body is present
-				if (this.gzipTE) {
-					this.headers.add(Map.entry("Transfer-Encoding", "gzip, chunked"));
-				} else if (contentLength < 0) { // unknown length
-					this.headers.add(Map.entry("Transfer-Encoding", "chunked"));
+			TransferEncoding transferEncoding;
+			if (bodyPub instanceof NoBody infBody) {
+				if (infBody.infHeader() != null) {
+					headers.add(infBody.infHeader());
+				}
+				if (closeConnection) {
+					transferEncoding = TransferEncoding.NONE_AND_CLOSE;
 				} else {
-					this.headers.add(Map.entry("Content-Length", Long.toString(contentLength)));
+					transferEncoding = TransferEncoding.NONE;
+				}
+			} else {
+				if (gzipTransferEncoding) {
+					if (closeConnection) {
+						headers.add(Map.entry("Transfer-Encoding", "gzip"));
+						transferEncoding = TransferEncoding.GZIP_AND_CLOSE;
+					} else {
+						headers.add(Map.entry("Transfer-Encoding", "gzip, chunked"));
+						transferEncoding = TransferEncoding.GZIP_AND_CHUNKED;
+					}
+				} else {
+					long contentLength = bodyPub.contentLength();
+					if (contentLength < 0) { // unknown length
+						if (closeConnection) {
+							transferEncoding = TransferEncoding.NONE_AND_CLOSE;
+						} else {
+							headers.add(Map.entry("Transfer-Encoding", "chunked"));
+							transferEncoding = TransferEncoding.CHUNKED;
+						}
+					} else {
+						headers.add(Map.entry("Content-Length", Long.toString(contentLength)));
+						if (closeConnection) {
+							transferEncoding = TransferEncoding.NONE_AND_CLOSE;
+						} else {
+							transferEncoding = TransferEncoding.NONE;
+						}
+					}
 				}
 			}
-			return new HttpResponse(this.version, this.status, this.headers,
-					this.bodyPub, this.gzipTE);
+			// construct response
+			return new HttpResponse(version, status, headers, bodyPub, transferEncoding);
 		}
 		
+	}
+	
+	private enum TransferEncoding {
+		NONE, // use no transfer encoding, keep connection alive
+		NONE_AND_CLOSE, // no transfer encoding, close connection
+		CHUNKED, // use chunked transfer encoding and keep conection alive
+		GZIP_AND_CHUNKED, // use gzip and then chunked transfer encoding, keep connection alive
+		GZIP_AND_CLOSE // use gzip transfer encoding and close connection
 	}
 	
 	public static sealed interface BodyPublisher
@@ -245,10 +304,16 @@ public class HttpResponse {
 			}
 			
 			public static BodyPublisher ofByteArray(byte[] b, int offset, int length) {
+				if (offset < 0 || length < 0 || offset + length > b.length) {
+					throw new IllegalArgumentException();
+				}
 				return new BodyPublisherOfByteArray(b, offset, length);
 			}
 			
-			public static BodyPublisher ofFile(Path path) {
+			public static BodyPublisher ofFile(Path path) throws FileNotFoundException {
+				if (!Files.isRegularFile(path)) {
+					throw new FileNotFoundException();
+				}
 				return new BodyPublisherOfFile(path);
 			}
 			
@@ -266,6 +331,25 @@ public class HttpResponse {
 			
 			public static BodyPublisher noBody() {
 				return NO_BODY;
+			}
+			
+			public static BodyPublisher noBodyInformationalContentLength(long informationalContentLength) {
+				if (informationalContentLength < 0) {
+					throw new IllegalArgumentException();
+				}
+				return new NoBody(Map.entry("Content-Length", Long.toString(informationalContentLength)));
+			}
+			
+			public static BodyPublisher noBodyInformationalTransferEncoding(boolean informationalGzip, boolean informationalChunked) {
+				if (informationalGzip && informationalChunked) {
+					return NO_BODY_INFORMATIONAL_GZIP_AND_CHUNKED;
+				} else if (informationalChunked) {
+					return NO_BODY_INFORMATIONAL_CHUNKED;
+				} else if (informationalGzip) {
+					return NO_BODY_INFORMATIONAL_GZIP;
+				} else {
+					return NO_BODY;
+				}
 			}
 			
 			/* More BodyPublishers might be implemented in the future.
@@ -305,13 +389,16 @@ public class HttpResponse {
 		}
 	}
 	
-	private static record NoBody() implements BodyPublisher {
+	private static record NoBody(Map.Entry<String, String> infHeader) implements BodyPublisher {
 		public void writeTo(OutputStream out) {} // Do nothing.
 		public long contentLength() {
 			return 0L;
 		}
 	}
 	
-	private static final NoBody NO_BODY = new NoBody();
+	private static final NoBody NO_BODY = new NoBody(null);
+	private static final NoBody NO_BODY_INFORMATIONAL_GZIP_AND_CHUNKED = new NoBody(Map.entry("Transfer-Encoding", "gzip, chunked"));
+	private static final NoBody NO_BODY_INFORMATIONAL_CHUNKED = new NoBody(Map.entry("Transfer-Encoding", "chunked"));
+	private static final NoBody NO_BODY_INFORMATIONAL_GZIP = new NoBody(Map.entry("Transfer-Encoding", "gzip"));
 
 }
