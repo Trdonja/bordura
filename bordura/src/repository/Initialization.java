@@ -7,16 +7,14 @@ import java.sql.Statement;
 
 public class Initialization {
 	
-	private static final String dbUrl = "jdbc:sqlite:" + Configurations.databasePath + "bordura.db";
-	
 	public static void createNewDatabase() throws SQLException {
-		try (Connection dbcon = DriverManager.getConnection(dbUrl)) {
+		try (Connection dbcon = DriverManager.getConnection(Configurations.dbUrl)) {
 			// Skip. If connection gets established, a database is created.
 		}
 	}
 	
 	public static void createTables() throws SQLException {
-		try (Connection dbcon = DriverManager.getConnection(dbUrl);
+		try (Connection dbcon = DriverManager.getConnection(Configurations.dbUrl);
 			Statement stmt = dbcon.createStatement()) {
 			stmt.execute("PRAGMA foreign_keys = ON;"); // enable foreign keys
 			stmt.execute("""
@@ -33,7 +31,7 @@ public class Initialization {
 					ip           BLOB NOT NULL,
 					port         INTEGER NOT NULL,
 					peer_id      INTEGER REFERENCES peer(id),
-					active       INTEGER CHECK(active >= 0 AND active <= 1)), -- boolean
+					active       INTEGER CHECK(active >= 0 AND active <= 1), -- boolean
 					last_contact TEXT, -- date time
 					PRIMARY KEY (ip, port)
 				);
@@ -41,8 +39,9 @@ public class Initialization {
 			stmt.execute("""
 				CREATE TABLE IF NOT EXISTS public_key(
 					guid     BLOB PRIMARY KEY,
-					alias    TEXT UNIQUE NOT NULL, -- KeyStore entry alias
+					key_val  BLOB UNIQUE NOT NULL, -- serialized Key object bytes
 					owner    INTEGER REFERENCES peer(id),
+					valid_to TEXT, -- date time
 					obtained TEXT -- date time
 				)
 			""");
@@ -51,14 +50,14 @@ public class Initialization {
 					guid        BLOB PRIMARY KEY, -- uuid
 					name        TEXT NOT NULL,
 					description TEXT,
-					public      INTEGER CHECK(public >= 0 AND public <= 1)) -- boolean, {1; public} | {0; private}
+					public      INTEGER CHECK(public >= 0 AND public <= 1) -- boolean, {1; public} | {0; private}
 				);
 			""");
 			stmt.execute("""
 				CREATE TABLE IF NOT EXISTS participates(
 					peer          INTEGER NOT NULL REFERENCES peer(id),
 					publish_list  BLOB NOT NULL REFERENCES publish_list(guid),
-					participation INTEGER CHECK(participation >= 1 AND participation <= 2)), -- {1; allowed} | {2; denied}
+					participation INTEGER CHECK(participation >= 1 AND participation <= 2), -- {1; allowed} | {2; denied}
 					UNIQUE (peer, publish_list)
 				);
 			""");
@@ -72,7 +71,7 @@ public class Initialization {
 					obtained_from_port INTEGER,
 					obtain_date        TEXT,
 					total_size         INTEGER NOT NULL, -- sum of all corresp. content lengths
-					publishable        INTEGER CHECK(publishable >= 0 AND publishable <= 1)), -- boolean
+					publishable        INTEGER CHECK(publishable >= 0 AND publishable <= 1), -- boolean
 					FOREIGN KEY (obtained_from_ip, obtained_from_port) REFERENCES address(ip, port)
 				);
 			""");
@@ -80,8 +79,8 @@ public class Initialization {
 				CREATE TABLE IF NOT EXISTS content(
 					post_id    INTEGER NOT NULL REFERENCES post(id),
 					ordinal    INTEGER NOT NULL,
-					type       INTEGER NOT NULL, -- text/message | image/jpeg | video/mp4 | audio/mp3 | post_reference | datum | ...
-					storage    INTEGER NOT NULL CHECHK(storage >= 0 AND storage <= 1), -- inline or in file
+					type       INTEGER NOT NULL, -- text/message | image/jpeg | video/mp4 | audio/mp3 | post_reference | datum | summarization | ...
+					storage    INTEGER NOT NULL CHECK(storage >= 0 AND storage <= 1), -- inline or in file
 					value      TEXT NOT NULL, -- can be BLOB too; is a file-path, if storage == 1
 					properties TEXT_JSON, -- properties for classification in json format
 					PRIMARY KEY (post_id, ordinal)
@@ -91,7 +90,7 @@ public class Initialization {
 				CREATE TABLE IF NOT EXISTS permits(
 					post       INTEGER NOT NULL REFERENCES post(id),
 					peer       INTEGER NOT NULL REFERENCES peer(id),
-					permission INTEGER CHECK(permission >= 1 AND permission <= 2)), -- {1; allow} | {2; deny}
+					permission INTEGER CHECK(permission >= 1 AND permission <= 2), -- {1; allow} | {2; deny}
 					UNIQUE (post, peer)
 				);
 			""");
