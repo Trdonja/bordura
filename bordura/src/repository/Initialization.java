@@ -87,7 +87,7 @@ public class Initialization {
 					id         INTEGER PRIMARY KEY,
 					post_id    INTEGER NOT NULL REFERENCES post(id),
 					ordinal    INTEGER NOT NULL,
-					type       INTEGER NOT NULL, -- text/message | image/jpeg | video/mp4 | audio/mp3 | post_reference | datum | summarization | label | balast | ...
+					type       INTEGER NOT NULL, -- text/message | image/jpeg | video/mp4 | audio/mp3 | post_reference | datum | summarization | label | balast | signature_statement | signature_statement_with_reference | ...
 					storage    INTEGER NOT NULL CHECK(storage >= 0 AND storage <= 1), -- inline or in file
 					value      TEXT NOT NULL, -- can be BLOB too; is a file-path, if storage == 1
 					properties TEXT_JSON, -- properties for classification in json format
