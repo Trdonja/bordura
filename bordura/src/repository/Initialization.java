@@ -31,10 +31,16 @@ public class Initialization {
 					id           INTEGER PRIMARY KEY,
 					ip           BLOB NOT NULL,
 					port         INTEGER NOT NULL,
-					peer_id      INTEGER REFERENCES peer(id),
-					active       INTEGER CHECK(active >= 0 AND active <= 1), -- boolean
-					last_contact TEXT, -- date time
 					UNIQUE (ip, port)
+				);
+			""");
+			stmt.execute("""
+				CREATE TABLE IF NOT EXISTS address_usage(
+					address_id   INTEGER REFERENCES address(id),
+					peer_id      INTEGER REFERENCES peer(id),
+					active_from  TEXT, -- date time
+					active_to    TEXT, -- date time for expired relation or string 'indefinite' for valid relation
+					last_contact TEXT -- date time
 				);
 			""");
 			stmt.execute("""
@@ -50,7 +56,7 @@ public class Initialization {
 			stmt.execute("""
 				CREATE TABLE IF NOT EXISTS publish_list(
 					id          INTEGER PRIMARY KEY,
-					guid        BLOB UNIQUE NOT NULL, -- uuid
+					label_guid  BLOB, -- uuid of label or null, if not associated with label
 					name        TEXT NOT NULL,
 					description TEXT,
 					public      INTEGER CHECK(public >= 0 AND public <= 1) -- boolean, {1; public} | {0; private}
@@ -81,7 +87,7 @@ public class Initialization {
 					id         INTEGER PRIMARY KEY,
 					post_id    INTEGER NOT NULL REFERENCES post(id),
 					ordinal    INTEGER NOT NULL,
-					type       INTEGER NOT NULL, -- text/message | image/jpeg | video/mp4 | audio/mp3 | post_reference | datum | summarization | ...
+					type       INTEGER NOT NULL, -- text/message | image/jpeg | video/mp4 | audio/mp3 | post_reference | datum | layout | summarization | label | balast | signature_statement | signature_statement_with_reference | label_descriptor | ...
 					storage    INTEGER NOT NULL CHECK(storage >= 0 AND storage <= 1), -- inline or in file
 					value      TEXT NOT NULL, -- can be BLOB too; is a file-path, if storage == 1
 					properties TEXT_JSON, -- properties for classification in json format
